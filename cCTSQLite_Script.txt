@@ -1,0 +1,232 @@
+#Include Once "cCTSQL\cCTSQLite.bi"
+
+
+
+declare function SQLLogCallback CDecl (ByRef pAny as uLong,ByVal nError as Long,ByVal pMessage as ZString Ptr) as Long
+declare Sub Backup_Progress (ByVal pSource as sqlite3,ByVal iTotalPages as Long,ByVal iRemainingPages as Long)
+
+Dim oSQLite                  as cCTSQLite = ProcPtr(SQLLogCallback)
+Dim oSpooler                 as cCTSQLiteSpooler
+Dim hSpool                   as HANDLE
+Dim iVersion                 as Long
+Dim iFileSize                as LongInt
+Dim lBLOB                    as BOOLEAN
+Dim sValue                   as String
+Dim arPragma(0 To 0)         as SqlitePragma
+Dim sStartUpErrorDescription as String
+Dim pDB                      as sqlite3
+Dim pDBBackup                as sqlite3_backup
+Dim iErrorCode               as Long
+Dim sDatabaseName            as String 
+Dim sSQL                     as String
+Dim iCols                    as Long
+Dim iRows                    as Long
+Dim sErrorDescription        as String
+Dim lResult                  as BOOLEAN
+Dim iIndex                   as Long
+Dim iRowIndex                as Long
+Dim sResultRow               as String
+Dim sBackupName              as String
+Dim uLocalTime               as SystemTime  
+
+   If oSQLite.StartupStatus (sStartUpErrorDescription) = False Then
+   
+      Print "Server startup failed. " + sStartUpErrorDescription
+      
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"   
+      
+      END
+      
+   End If
+ 
+   Print "SQLite Library version=" + oSQLite.Version
+      
+   sDatabaseName = ":memory:"
+   If oSQLite.OpenDatabase(sDatabaseName,pDB,iErrorCode,SQLITE_OPEN_READWRITE Or SQLITE_OPEN_CREATE) = False Then   
+      Print "Open of " + sDatabaseName + " failed. Code=" + Str(iErrorCode)
+      
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"   
+      
+      End
+   End If
+   
+   arPragma(0).Name = "USER_VERSION"
+   arPragma(0).Value = "100"
+   
+   Print "SetPragma=" + Str(oSQlite.SetPragma(pDB,oSpooler,iErrorCode,sErrorDescription,arPragma()))
+   
+   oSQLite.DatabaseVersion(pDB,iVersion,oSpooler,iErrorCode,sErrorDescription)
+      
+   Print "Open of " + sDatabaseName + " was successful,Database Version=" + Str(iVersion)
+
+' Create a table
+   
+   sSQL = "CREATE TABLE POSTAL (POSTALID INTEGER PRIMARY KEY," _
+        + "CTRYCD TEXT," _
+        + "POSTALCD TEXT," _
+        + "CITYNAME TEXT," _
+        + "STATE TEXT," _
+        + "DATELASTMAINT TEXT DEFAULT (DATETIME('NOW')));"
+   
+   
+   lResult = oSQLite.SQLExecNonQuery(pDB,sSQL,iCols,iRows,hSpool,oSpooler,iFileSize,iErrorCode,sErrorDescription,False)
+   
+   If lResult = False Then
+   
+      Print "Table create failed,error=" + sErrorDescription
+      Print "Extended error=" + oSQLite.SQLExtendedErrorDescription(pDB,iErrorCode)
+      oSQLite.CloseDatabase(pDB,iErrorCode)
+      
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"   
+      
+      End
+      
+   End If
+
+   Print "Table create successful..."   
+   
+' Insert some rows
+
+   sSQL = "INSERT INTO POSTAL (POSTALID,CTRYCD,POSTALCD,CITYNAME,STATE) VALUES (1,'USA','00501','Holtsville','NY');" _
+          "INSERT INTO POSTAL (POSTALID,CTRYCD,POSTALCD,CITYNAME,STATE) VALUES (2,'USA','00544','Holtsville','NY');"
+           
+   lResult = oSQLite.SQLExecNonQuery(pDB,sSQL,iCols,iRows,hSpool,oSpooler,iFileSize,iErrorCode,sErrorDescription,False)
+   
+   If lResult = False Then
+   
+      Print "Insert rows failed,error=" + sErrorDescription
+      oSQLite.CloseDatabase(pDB,iErrorCode)
+      
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"   
+      
+      End
+      
+   End If
+   
+   Print "Row insert successful..."
+   
+   print "" 
+   
+   sSQL = "select * from POSTAL;"
+   
+   lResult = oSQLite.SQLExecQuery(pDB,sSQL,iCols,iRows,hSpool,oSpooler,iFileSize,iErrorCode,sErrorDescription,True)
+
+   If lResult = False Then
+   
+      Print "Select rows failed,error=" + sErrorDescription
+      oSQLite.CloseDatabase(pDB,iErrorCode)
+      
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"   
+      
+      End
+      
+   End If
+   
+      oSpooler.EndSpoolStreamFile(hSpool,iErrorCode,sErrorDescription)
+
+   Print ""
+   Print "Query Results..."
+   Print ""
+   For iRowIndex = 1 To iRows
+   
+       sResultRow = ""
+   
+       For iIndex = 1 To iCols 
+   
+          oSpooler.ReadSpoolerResultBlock(hSpool,lBLOB,sValue,iErrorCode,sErrorDescription)
+
+          sResultRow = sResultRow + " " + sValue
+   
+       Next
+   
+       Print sResultRow
+   
+   Next
+   
+   oSpooler.CloseSpoolFile(hSpool,iErrorCode,sErrorDescription)
+
+   Print ""
+   
+   GetLocalTime(ByVal VarPtr(uLocalTime))
+   
+   sBackupName = "Memory_" _
+               + Str(uLocalTime.wYear) _
+               + "_" _
+               + Str(uLocalTime.wMonth) _
+               + "_" _
+               + Str(uLocalTime.wDay) _
+               + "_" _
+               + Str(uLocalTime.wHour) _
+               + "_" _
+               + Str(uLocalTime.wMinute) _
+               + "_" _
+               + Str(uLocalTime.wSecond) _
+               + ".db3"
+               
+   Print "Backup to file " + sBackupName
+               
+   If oSQLite.DatabaseBackup(pDB,sBackupName,iErrorCode,sErrorDescription,1,@Backup_Progress) = True Then
+   
+      Print "Backup successful..."
+      
+   Else
+   
+      Print "Backup failed," + sErrorDescription
+      
+   End If
+   
+   Print "Close of " + sDatabaseName + "=" + Str(oSQLite.CloseDatabase(pDB,iErrorCode))
+   
+   Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"
+
+Function SQLLogCallback CDecl (ByRef pAny as uLong,ByVal nError as Long,ByVal pMessage as ZString Ptr) as Long
+
+Dim uLocalTime               as SystemTime
+
+   GetLocalTime(ByVal VarPtr(uLocalTime))
+   
+   Print "Log at "_
+         + Str(uLocalTime.wYear) _
+         + "_" _
+         + Str(uLocalTime.wMonth) _
+         + "_" _
+         + Str(uLocalTime.wDay) _
+         + "_" _
+         + Str(uLocalTime.wHour) _
+         + "_" _
+         + Str(uLocalTime.wMinute) _
+         + "_" _
+         + Str(uLocalTime.wSecond) _
+         + ",Error=" + Str(nError)
+         
+    Print ""
+    Print *Cast(ZString Ptr,pMessage)
+    Print ""
+    
+    Function = 0            
+
+End Function
+Sub Backup_Progress (ByVal pSource as sqlite3,ByVal iTotalPages as Long,ByVal iRemainingPages as Long)
+
+    Print "Backup Progress," + "Total Pages=" + Str(iTotalPages) + ",Remaining Pages=" + Str(iRemainingPages) + " (" _
+           + Str(((iTotalPages - iRemainingPages) / iTotalPages) * 100) + "%)"
+
+End Sub

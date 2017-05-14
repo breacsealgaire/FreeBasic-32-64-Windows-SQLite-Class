@@ -1,0 +1,146 @@
+#Include Once "cCTSQL/cCTSQLLiteCrypto.bi"
+#Include Once "string.bi"
+
+Dim oCrypto as cCTSQLLiteCrypto
+Dim iIndex1        as Long
+Dim iIndex2        as Long
+Dim sSessionKey    as String
+Dim sSessionHex    as String
+Dim sHash          as String
+Dim sHashHex       as String
+Dim sPlainText     as String
+Dim sCipherText    as String
+Dim sCipherHex     as String
+
+' Client side
+
+Dim oCryptoClient       as cCTSQLLiteCrypto
+Dim iClientClientIndex1 as Long
+Dim iClientClientIndex2 as Long
+Dim iClientServerIndex1 as Long
+Dim iClientServerIndex2 as Long
+Dim sClientClientKey    as String
+Dim sClientServerKey    as String
+Dim sServerResponse     as String
+Dim sClientDecrypt      as String
+Dim sClientEncrypt      as String
+Dim sClientHex          as String
+Dim sClientRandom       as String
+Dim sClientHash         as String
+Dim sClientServerMessage      as String
+Dim sClientServerAuth         as String
+
+' Server side
+
+Dim oCryptoServer       as cCTSQLLiteCrypto
+Dim iServerClientIndex1 as Long
+Dim iServerClientIndex2 as Long
+Dim iServerServerIndex1 as Long
+Dim iServerServerIndex2 as Long
+Dim sServerClientKey    as String
+Dim sServerServerKey    as String
+Dim sClientResponse     as String
+Dim sServerIndices      as String
+Dim sServerClientRandom as String
+Dim sServerClientHash   as String
+Dim sServerDecrypt      as String
+Dim sServerHex          as String
+Dim sServerHash         as String
+
+ 
+   Print "Client connects..."
+   Print "Server randomly selects session crypto indices and sends to client..."
+   
+   sServerClientKey = oCryptoServer.SessionKey(iServerClientIndex1,iServerClientIndex2)
+   sServerServerKey = oCryptoServer.SessionKey(iServerServerIndex1,iServerServerIndex2)
+   
+   sServerIndices = Format(iServerClientIndex1,"0000") + Format(iServerClientIndex2,"0000") _
+                  + Format(iServerServerIndex1,"0000") + Format(iServerServerIndex2,"0000")
+                  
+   Print "Server clear connection response=" + sServerIndices
+                  
+' Encrypt response with shared key and respond
+
+   oCryptoServer.EncryptText(sServerIndices,sServerResponse,5,6)
+   
+   Print "Client receives the response with session indices..."
+   oCryptoClient.Bin2Hex(sServerResponse,sClientHex)
+   Print "Encrypted server response=" + sClientHex
+   oCryptoClient.DecryptText(sServerResponse,sClientDecrypt,5,6)
+   Print "Decrypted server response=" + sClientDecrypt
+
+' Save Encryption indices from server
+   
+   iClientClientIndex1 = Val(Left(sClientDecrypt,4))
+   iClientClientIndex2 = Val(Mid(sClientDecrypt,5,4))
+   iClientServerIndex1  = Val(Mid(sClientDecrypt,9,4))
+   iClientServerIndex2  = Val(Mid(sClientDecrypt,13,4))
+   
+' Client generates a random 64 bit value and then hashes it
+
+   oCryptoClient.RandomString(sClientRandom,8)
+   oCryptoClient.HashString(sClientRandom,sClientHash)
+   sClientServerAuth = sClientRandom + sClientHash
+   
+   oCryptoClient.Bin2Hex(sClientServerAuth,sClientHex)
+   Print "Client Clear Auth Message=" + sClientHex
+   
+' Client encrypts random value with client session key
+
+   oCryptoClient.EncryptText(sClientRandom,sClientServerAuth,iClientClientIndex1,iClientClientIndex2)
+   
+' Client encrypts hash with server key
+
+   oCryptoClient.EncryptText(sClientHash,sClientEncrypt,iClientServerIndex1,iClientServerIndex2)
+
+' This is the encrypted client authentication request message sent to the server
+
+   sClientResponse = sClientServerAuth + sClientEncrypt
+
+   oCryptoClient.Bin2Hex(sClientResponse,sClientHex)
+   Print "Client Encrypted Auth Message=" + sClientHex
+   
+' Server receives the client authentication message
+
+   sServerClientRandom = Left(sClientResponse,16)
+   sServerClientHash = Mid(sClientResponse,17,48)
+   
+' Server decrypts random value with client key
+
+   oCryptoServer.DecryptText(sServerClientRandom,sServerDecrypt,iServerClientIndex1,iServerClientIndex2)
+   
+   oCryptoServer.Bin2Hex(sServerDecrypt,sServerHex)
+   Print "Client Random value received=" + sServerHex
+   sServerClientRandom = sServerDecrypt
+   
+' Server decrypts hash value with server key
+
+   oCryptoServer.DecryptText(sServerClientHash,sServerDecrypt,iServerServerIndex1,iServerServerIndex2)
+   
+   oCryptoServer.Bin2Hex(sServerDecrypt,sServerHex)
+   Print "Client hash value received=" + sServerHex
+   sServerClientHash = sServerDecrypt
+   
+' Server hashes the random value and compares
+
+   oCryptoServer.HashString(sServerClientRandom,sServerHash)
+
+   oCryptoServer.Bin2Hex(sServerHash,sServerHex)   
+   Print "Server hash check=" + sServerHex 
+   
+   If sServerClientHash = sServerHash Then
+   
+      Print "Client authenticated..."
+      
+   Else
+   
+      Print "Client authentication failed..."
+      
+   End If
+   
+   print ""
+   
+   Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"

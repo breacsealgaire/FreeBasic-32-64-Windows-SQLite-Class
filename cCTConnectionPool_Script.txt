@@ -1,0 +1,250 @@
+#Include Once "cCTSQL/cCTSqlite.bi"
+#include Once "cCTSQL/cCTConnectionPool.bi"
+#Include Once "string.bi"
+#Include Once "fbthread.bi"
+
+declare Sub thread( ByVal userdata as Any Ptr )
+declare function DatabaseOpen() as sqlite3
+declare function SelectQuery(byval pDB as sqlite3) as long
+declare sub CloseDatabase(byval pDB as sqlite3)
+declare function SQLLogCallback CDecl (ByRef pAny as uLong,ByVal nError as Long,ByVal pMessage as ZString Ptr) as Long
+
+Dim Shared oPool as cCTConnectionPool
+DIM SHARED oSQLite as cCTSQLite = Cast(any ptr,@SQLLogCallback)
+dim shared oSpooler as cCTSQLiteSpooler
+
+Dim iPoolID                     as Long
+Dim iPoolSize                   as Long
+Dim iTotalCurrentConnections    as Long
+Dim iTotalActiveConnections     as Long
+Dim nAverageRequestMilliseconds as Double
+Dim arPool()                    as POOL_CONNECTION
+dim pDB                         as sqlite3
+dim dStart                      as Double
+dim dEnd                        as double
+dim pThread                     as any ptr
+Dim iErrorCode                  as Long
+dim sSQL                        as string
+Dim sErrorDescription           as String
+Dim hSpool                      as HANDLE
+Dim iFileSize                   as LongInt
+dim iCols                       as Long
+dim iRows                       as long
+dim lResult                     as BOOLEAN
+
+' Create one pool connection for threads to request
+
+Print "SQLite Library version=" + oSQLite.Version
+print ""
+
+Print "Adding pool connection,DatabaseID=1"
+Print ""
+
+pDB = DatabaseOpen()
+oPool.AddPoolConnection(1,pDB)
+
+' Create a table
+   
+   sSQL = "CREATE TABLE POSTAL (POSTALID INTEGER PRIMARY KEY," _
+        + "CTRYCD TEXT," _
+        + "POSTALCD TEXT," _
+        + "CITYNAME TEXT," _
+        + "STATE TEXT," _
+        + "DATELASTMAINT TEXT DEFAULT (DATETIME('NOW')));"
+   
+   
+   lResult = oSQLite.SQLExecNonQuery(pDB,sSQL,iCols,iRows,hSpool,oSpooler,iFileSize,iErrorCode,sErrorDescription,False)
+   
+   If lResult = False Then
+   
+      Print "Table create failed,error=" + sErrorDescription
+      Print "Extended error=" + oSQLite.SQLExtendedErrorDescription(pDB,iErrorCode)
+      oSQLite.CloseDatabase(pDB,iErrorCode)
+      
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"   
+      
+      End
+      
+   end if
+
+   Print "Table create successful..."   
+   
+' Insert some rows
+
+   sSQL = "INSERT INTO POSTAL (POSTALID,CTRYCD,POSTALCD,CITYNAME,STATE) VALUES (1,'USA','00501','Holtsville','NY');" _
+          "INSERT INTO POSTAL (POSTALID,CTRYCD,POSTALCD,CITYNAME,STATE) VALUES (2,'USA','00544','Holtsville','NY');"
+           
+   lResult = oSQLite.SQLExecNonQuery(pDB,sSQL,iCols,iRows,hSpool,oSpooler,iFileSize,iErrorCode,sErrorDescription,False)
+   
+   If lResult = False Then
+   
+      Print "Insert rows failed,error=" + sErrorDescription
+      oSQLite.CloseDatabase(pDB,iErrorCode)
+      
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"   
+      
+      End
+      
+   End If
+   
+   Print "Row insert successful..."
+   
+   print ""
+
+oPool.ReleasePoolConnection(1,pDB)
+
+Print "Starting 100 threads..."
+Print ""
+
+For iPoolID = 2 To 101
+
+pThread = ThreadCreate(@thread,cast(any ptr,varptr(iPoolID)))
+ThreadDetach(pThread)
+Sleep 20,1
+
+Next
+
+print "100 threads started..."
+print ""
+
+' Give threads some time to complete
+
+Sleep 1000,1
+
+Print "Checking pool statistics..."
+Print ""
+
+oPool.PoolConnectionStatistics (iPoolSize,iTotalCurrentConnections,iTotalActiveConnections,nAverageRequestMilliseconds)
+
+Print "Pool size=" + Format(iPoolSize)
+Print "Total Current Connections=" + Format(iTotalCurrentConnections)
+Print "Total Active Connections=" + Format(iTotalActiveConnections)
+Print "Average connection in use time=" + Format(nAverageRequestMilliseconds) + " milliseconds"
+Print ""
+Print "On server shutdown, the following connections need to be closed..."
+Print ""
+
+oPool.PoolConnectionDetail(arPool())
+
+For iPoolID = 0 To UBound(arPool)
+
+' For demo only, we won't check for the connection still in use, the server will have to allow for connections still in use during shutdown
+
+Print "Close DatabaseID=" + Format(arPool(iPoolID).DatabaseID) + ",ConnectionID=" + Format(arPool(iPoolID).ConnectionID)
+CloseDatabase(arPool(iPoolID).ConnectionID)
+oPool.RemovePoolConnection(arPool(iPoolID).DatabaseID,arPool(iPoolID).ConnectionID)
+
+Next
+
+Print ""
+
+Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"
+
+Sub thread( ByVal userdata as Any Ptr )
+
+Dim as uLong iConnectionID
+dim iRows as long
+dim iThreadID as long
+
+iThreadID = *cast(long ptr,userdata)
+ 
+
+' If pool connection request is false then add a new database connection
+
+If oPool.RequestPoolConnection(1,iConnectionID) = False Then
+
+iConnectionID = DatabaseOpen()
+oPool.AddPoolConnection(1,iConnectionID)
+
+   
+End If
+
+' database request
+
+print "query submitted,thread=" + str(iThreadID)
+
+iRows = SelectQuery(iConnectionID)
+
+' Release the connection back to the pool
+
+oPool.ReleasePoolConnection(1,iConnectionID)
+
+print "query finished,rows=" + str(iRows) + ",thread=" + str(iThreadID)
+
+Sleep 10,1
+ 
+End Sub
+function DatabaseOpen() as sqlite3
+
+Dim pDB                      as sqlite3
+Dim iErrorCode               as Long
+Dim sDatabaseName            as String 
+Dim sErrorDescription        as String
+
+sDatabaseName = ":memory:"
+oSQLite.OpenDatabase(sDatabaseName,pDB,iErrorCode,SQLITE_OPEN_READWRITE or SQLITE_OPEN_WAL)
+
+function = pDB
+  
+END FUNCTION
+function SelectQuery(byval pDB as sqlite3) as long
+
+Dim iErrorCode               as Long
+dim sSQL                     as string
+Dim sErrorDescription        as String
+Dim hSpool                   as HANDLE
+Dim iFileSize                as LongInt
+dim iCols                    as Long
+dim iRows                    as long
+
+sSQL = "SELECT * from POSTAL;"
+oSQLite.SQLExecQuery(pDB,sSQL,iCols,iRows,hSpool,oSpooler,iFileSize,iErrorCode,sErrorDescription,true)
+oSpooler.CloseSpoolFile(hSpool,iErrorCode,sErrorDescription)
+
+
+function = iRows
+   
+END function
+sub CloseDatabase(byval pDB as sqlite3)
+
+Dim iErrorCode               as Long
+
+oSQLite.CloseDatabase(pDB,iErrorCode)
+   
+END SUB
+Function SQLLogCallback CDecl (ByRef pAny as uLong,ByVal nError as Long,ByVal pMessage as ZString Ptr) as Long
+
+Dim uLocalTime               as SystemTime
+
+   GetLocalTime(ByVal VarPtr(uLocalTime))
+   
+   Print "Log at "_
+         + Str(uLocalTime.wYear) _
+         + "_" _
+         + Str(uLocalTime.wMonth) _
+         + "_" _
+         + Str(uLocalTime.wDay) _
+         + "_" _
+         + Str(uLocalTime.wHour) _
+         + "_" _
+         + Str(uLocalTime.wMinute) _
+         + "_" _
+         + Str(uLocalTime.wSecond) _
+         + ",Error=" + Str(nError)
+         
+    Print ""
+    Print *Cast(ZString Ptr,pMessage)
+    Print ""
+    
+    Function = 0            
+
+End Function

@@ -1,0 +1,57 @@
+#Include Once "string.bi"
+#Include Once "cCTSQL\cCTSocket.bi"
+
+Dim oSocket         as cCTSocket
+Dim sLocalHostName  as String
+Dim sHostName       as String
+Dim sIPAddress      as String
+Dim SockAddress     as SOCKADDR_IN
+Dim hSocket         as SOCKET
+Dim sSend           as String
+Dim sResponse       as String
+Dim sHeaders        as String
+Dim sBody           as String
+Dim sWANIP          as String
+Dim iIndex          as Long 
+
+    oSocket.PreferredAddress(sLocalHostName,SockAddress)
+    oSocket.IPToString(SockAddress.sin_addr.s_addr,sIPAddress)  
+    Print "Local Host Name=" + sLocalHostName
+    Print "Preferred Local IP=" + sIPAddress
+        
+' Get WAN IP and FQDN
+
+    sHostName = "checkip.dyndns.org"
+    oSocket.IPFromHostName(sHostName,sIPAddress)
+    Print sHostName + "=" + sIPAddress
+    sSend = "GET /" + " HTTP/1.1" + Chr(13) + Chr(10) + "Host: " + sHostName + Chr(13) + Chr(10) + Chr(13) + Chr(10)
+    
+    Print "Connecting to: " + sHostName + " (" + sIPAddress + ")"
+    
+    oSocket.TCPConnect(hSocket,sIPAddress,8245,30000)
+    Print "Connected..."
+    oSocket.SendAndReceiveSocket (hSocket,1024,sSend,sResponse,20)
+    oSocket.Disconnect(hSocket)
+   
+    iIndex = InStr(sResponse,Chr(13) + Chr(10))
+    sHeaders = Left(sResponse,iIndex - 1)
+    sBody = Right(sResponse,Len(sResponse) - iIndex - 1)
+    iIndex = InStr(UCase(sBody),"CURRENT IP ADDRESS: ")
+
+    Print "Response..." + Chr(13) + Chr(10)
+    Print "Header..." + Chr(13) + Chr(10) + Chr(13) + Chr(10) + sHeaders + Chr(13) + Chr(10)
+    Print "Body..." + Chr(13) + Chr(10) + Chr(13) + Chr(10) + sBody + Chr(13) + Chr(10)
+    
+    sWANIP = Mid(sBody,iIndex + 20)
+    iIndex = InStr(sWanIP,"<")
+    sIPAddress  = Mid(sWANIP,1,Len(sWANIP) - iIndex - 1)
+    oSocket.HostNameFromIP(sIPAddress,sHostName)
+    
+    Print "WAN IP=" + sIPAddress + ",FQDN=" + sHostName
+    
+    print ""
+    
+    Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"

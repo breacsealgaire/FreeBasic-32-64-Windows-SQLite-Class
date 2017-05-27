@@ -1,0 +1,51 @@
+#INCLUDE ONCE "cCTSQL/cCTServerThreadPool.bi"
+
+declare sub myThread (byval Instance as PTP_CALLBACK_INSTANCE, byval Context as PVOID, byval Work as PTP_WORK)
+dim shared lpCriticalSection as CRITICAL_SECTION
+
+dim oThreadPool       as cCTServerThreadPool
+dim iError            as long
+dim iIndex            as integer
+
+if oThreadPool.StartupStatus(iError) = False THEN
+   
+print "CreateThreadPool failed,error=" + str(iError)
+
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"   
+      
+      END
+   
+END IF
+
+InitializeCriticalSection(ByVal VarPtr(lpCriticalSection))
+   
+for iIndex = 1 to 10
+   
+oThreadPool.CreateThreadWork(cast(PTP_WORK_CALLBACK,@myThread),cast(PVOID,iIndex))
+   
+NEXT
+
+oThreadPool.ShutdownThreadPool()
+
+
+      Print "press q to quit"
+Do
+     Sleep 1, 1
+Loop Until Inkey = "q"
+
+end
+
+DeleteCriticalSection(ByVal VarPtr(lpCriticalSection))
+
+sub myThread (byval Instance as PTP_CALLBACK_INSTANCE, byval Context as PVOID, byval Work as PTP_WORK)
+
+EnterCriticalSection(ByVal VarPtr(lpCriticalSection))
+
+print "Thread started,Instance=" + str(Instance) + ",Context=" + str(Context)
+
+LeaveCriticalSection(ByVal VarPtr(lpCriticalSection))
+
+end sub
